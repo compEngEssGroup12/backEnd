@@ -70,92 +70,229 @@ exports.accessToken = (req, res) => {
     }
   };
 
-exports.getUserInfo = (req,res)=>{
-  try {
-    const profileOptions = {
-      headers: {
+exports.getInfo=(req,res)=>{
+  let returnProfile=null;
+  let returnCourse=null;
+  try{
+    const profileOptions={
+      headers:{
         Authorization: `Bearer ${req.session.token.access_token}`,
       },
     };
-    const profileReq = https.request(
+    const profileReq=https.request(
       "https://www.mycourseville.com/api/v1/public/get/user/info",
       profileOptions,
-      (profileRes) => {
-        let profileData = "";
-        profileRes.on("data", (chunk) => {
-          profileData += chunk;
+      (profileRes)=>{
+        let profileData="";
+        profileRes.on("data",(chunk)=>{
+          profileData+=chunk;
         });
-        profileRes.on("end", () => {
-          profileInfo=JSON.parse(profileData);
-          const studentInfo=profileInfo.data.student;
-          const makeUserData=function(student_id=studentInfo.id,
-                                        firstname_en=studentInfo.firstname_en,
-                                        lastname_en=studentInfo.lastname_en,
-                                        uid=profileInfo.data.account.uid){
-                              return{
-                                "student_id":student_id,
-                                "firstname_en":firstname_en,
-                                "lastname_en":lastname_en,
-                                "uid":uid
-                              };
-                            };
-          res.send(makeUserData());
-          res.end();
+        profileRes.on("end",()=>{
+          returnProfile=JSON.parse(profileData);
         });
       }
     );
-    profileReq.on("error", (err) => {
+    profileReq.on("error",(err)=>{
       console.error(err);
     });
+    const courseReq=https.request(
+      "https://www.mycourseville.com/api/v1/public/get/user/courses?detail=1",
+      profileOptions,
+      (courseRes)=>{
+        let courseData="";
+        courseRes.on("data",(chunk)=>{
+          courseData+=chunk;
+        });
+        courseRes.on("end",()=>{
+          let totalCourses=[];
+          const courses=JSON.parse(courseRes);
+          for(const course of courses.data.student){
+            if(course.semester==2){
+              totalCourses.add([course.cv_cid,course.course_no,course.title,[]]);
+            }
+          }
+          returnCourse=totalCourses;
+        });
+      }
+    );
+    courseReq.on("error",(err)=>{
+      console.error(err);
+    });
+    
+    for(const course of returnCourse){
+      const cv_cid=course[0];
+      const assignmentReq=https.request(
+        "https://www.mycourseville.com/api/v1/public/get/course/assignments?cv_cid="+cv_cid+"&detail=1",
+        profileOptions,
+        (assignmentRes)=>{
+          let assignmentData="";
+          assignmentRes.on("data",(chunk)=>{
+            assignmentData+=chunk;
+          });
+          assignmentRes.on("end",()=>{
+            const assignments=JSON.parse(assignmentData);
+            for(const assignment of assignments.data){
+              course[3].add([assignment.itemid,assignment.title,assignment.duetime,0]);
+            }
+          });
+        }
+      );
+      assignmentReq.on("error",(err)=>{
+        console.error(err);
+      });
+    }
+    // const getAssignmentStatus=async()=>{
+    //   const options = {
+    //     method:"GET",
+    //     credentials:"include",
+    //   };
+    //   await fetch(`http://${backendIPAddress}/items`,options)
+    //     .then((response)=>response.json())
+    //     .then((data)=>{
+    //       const assignments= data;
+    //       for(const state of assignments){
+    //         for(const course of returnCourse){
+    //           for(const assignment of course[3]){
+                
+    //           }
+    //         }
+    //       }  
+    //     })
+    // }
     profileReq.end();
-  } catch (error) {
-    console.log(error);
+    courseReq.end();
+    assignmentReq.end();
+    const sendAllData=function(student_id=returnProfile.data.student.id,
+                              student_firstname_en=returnProfile.data.student.firstname_en,
+                              student_lastname_en=returnProfile.data.student.lastname_en,
+                              courses=returnCourse){
+                                let allCourses=[];
+                                for(const course of courses){
+                                  let allAssignment=[];
+                                  for(const assignment of course[3]){
+                                    allAssignment.add({
+                                      "item_id":assignment[0],
+                                      "title":assignment[1],
+                                      "duetime":assignment[2]
+                                    });
+                                  }
+                                  allCourses.add(
+                                    {
+                                      "cv_cid":course[0],
+                                      "course_no":course[1],
+                                      "title":course[2],
+                                      "assignments":allAssignment
+                                    }
+                                  );
+                                }
+                        return{
+                          "student_id":student_id,
+                          "firstname_en":student_firstname_en,
+                          "lastname_en":student_lastname_en,
+                          "courses":allCourses
+                        };
+                              };
+  res.send(sendAllData());
+  res.end();
+                              
+  }                            
+    catch(error){
+    console.error(error);
     console.log("Please logout, then login again.");
   }
 };
 
-exports.getCourses = (req,res) => {
-    const options ={
-      headers: {
-        Authorization: `Bearer ${req.session.token.access_token}`,
-      },
-    };
-    try{
-      const Req=https.request(
-        "https://www.mycourseville.com/api/v1/public/get/user/courses",
-        options,
-        (Res)=>{
-          let responseData="";
-          Res.on("data",(chunk)=> {
-            responseData+=chunk;
-          });
-          Res.on("end",()=>{
-            const response=JSON.parse(responseData);
-            const courseInfo=response.data.student;
-            const totalCourse='{"courses": ';
-            for(const course of courseInfo){
-              if(course.semester==2){
-                totalCourse+='{"cv_cid":"'+course.cv_cid+'",';
-                totalCourse+='"course_no":"'+course.course_no+'"},';
-              }
-            }
-            totalCourse=totalCourse.slice(0,totalCourse.length-1)+'}';
-            totalCourse=JSON.parse(totalCourse);
-            res.send(totalCourse);
-            res.end();
-          });
-        }
-        );
-        Req.on("error",(err)=> {
-          console.error(err);
-        });
-        Req.end();
-    } catch(error){
-      console.log(error);
-      console.log("Please logout, then login again.");
-    }
-    res.end();
+exports.logout = (req, res) => {
+  req.session.destroy();
+  res.redirect(`http://${process.env.frontendIPAddress}/login.html`);
+  res.end();
 };
+// exports.getUserInfo = (req,res)=>{
+//   try {
+//     const profileOptions = {
+//       headers: {
+//         Authorization: `Bearer ${req.session.token.access_token}`,
+//       },
+//     };
+//     const profileReq = https.request(
+//       "https://www.mycourseville.com/api/v1/public/get/user/info",
+//       profileOptions,
+//       (profileRes) => {
+//         let profileData = "";
+//         profileRes.on("data", (chunk) => {
+//           profileData += chunk;
+//         });
+//         profileRes.on("end", () => {
+//           profileInfo=JSON.parse(profileData);
+//           const studentInfo=profileInfo.data.student;
+//           const makeUserData=function(student_id=studentInfo.id,
+//                                         firstname_en=studentInfo.firstname_en,
+//                                         lastname_en=studentInfo.lastname_en,
+//                                         uid=profileInfo.data.account.uid){
+//                               return{
+//                                 "student_id":student_id,
+//                                 "firstname_en":firstname_en,
+//                                 "lastname_en":lastname_en,
+//                                 "uid":uid
+//                               };
+//                             };
+//           res.send(makeUserData());
+//           res.end();
+//         });
+//       }
+//     );
+//     profileReq.on("error", (err) => {
+//       console.error(err);
+//     });
+//     profileReq.end();
+//   } catch (error) {
+//     console.log(error);
+//     console.log("Please logout, then login again.");
+//   }
+// };
+
+// exports.getCourses = (req,res) => {
+//     const options ={
+//       headers: {
+//         Authorization: `Bearer ${req.session.token.access_token}`,
+//       },
+//     };
+//     try{
+//       const Req=https.request(
+//         "https://www.mycourseville.com/api/v1/public/get/user/courses",
+//         options,
+//         (Res)=>{
+//           let responseData="";
+//           Res.on("data",(chunk)=> {
+//             responseData+=chunk;
+//           });
+//           Res.on("end",()=>{
+//             const response=JSON.parse(responseData);
+//             const courseInfo=response.data.student[0];
+//             const totalCourse='{"courses": ';
+//             for(const course of courseInfo){
+//               if(course.semester==2){
+//                 totalCourse+='{"cv_cid":"'+course.cv_cid+'",';
+//                 totalCourse+='"course_no":"'+course.course_no+'"},';
+//               }
+//             }
+//             totalCourse=totalCourse.slice(0,totalCourse.length-1)+'}';
+//             totalCourse=JSON.parse(totalCourse);
+//             res.send(totalCourse);
+//             res.end();
+//           });
+//         }
+//         );
+//         Req.on("error",(err)=> {
+//           console.error(err);
+//         });
+//         Req.end();
+//     } catch(error){
+//       console.log(error);
+//       console.log("Please logout, then login again.");
+//     }
+//     res.end();
+// };
 
 // exports.getCourseAssignments=(req,res)=>{
 //   const cv_cid=req.params.cv_cid;
