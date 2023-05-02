@@ -1,65 +1,20 @@
 const dotenv = require("dotenv");
 dotenv.config();
+
 const https = require("https");
 const url = require("url");
 const querystring = require("querystring");
 const {data} = require("express-session/session/cookie");
 
-const redirect_uri = `http://${process.env.backendIPAddress}/courseville/access_token`;
-const authorization_url = `https://www.mycourseville.com/api/oauth/authorize?response_type=code&client_id=${process.env.client_id}&redirect_uri=${redirect_uri}`;
+const redirect_uri = `http://${process.env.BACK_ADDRESS}/courseville/access_token`;
+const authorization_url = `https://www.mycourseville.com/api/oauth/authorize?response_type=code&client_id=${process.env.CLIENT_ID}&redirect_uri=${redirect_uri}`;
 const access_token_url = "https://www.mycourseville.com/api/oauth/access_token";
 
-const samplePayload = {
-  "student_id": "6430000021",
-  "firstname_en": "Sudyod",
-  "lastname_en": "Khengmak",
-  "courses": [
-    {
-      "cv_cid": 23442,
-      "course_no": "2110356",
-      "title": "Embbeded System [Section 1-2 and 33]",
-      "assignments": [
-        {
-          "item_id": 34245,
-          "title": "Pitchaya: Assignment 1 - Opamp - For Section 2  (Room 4-418)",
-          "duetime": 1680195540,
-          "state": 0 // haven't checked
-        },
-        {
-          "item_id": 34246,
-          "title": "Pitchaya: Assignment 2 - Opamp - For Section 2  (Room 4-418)",
-          "duetime": 1680195540,
-          "state": 1 // have checked
-        }
-      ]
-    },
-    {
-      "cv_cid": 23443,
-      "course_no": "2110357",
-      "title": "Embbeded System La [Section 1-2 and 33]",
-      "assignments": [
-        {
-          "item_id": 34247,
-          "title": "Pitchayaya: Assignment 3 - Opamp - For Section 2  (Room 4-418)",
-          "duetime": 1680195540,
-          "state": 0
-        },
-        {
-          "item_id": 34248,
-          "title": "Pitchayaya: Assignment 4 - Opamp - For Section 2  (Room 4-418)",
-          "duetime": 1690195540,
-          "state": 1
-        },
-        {
-          "item_id": 34249,
-          "title": "Pitchayaya: Assignment 5 - Opamp - For Section 2  (Room 4-418)",
-          "duetime": 1683022438,
-          "state": 1
-        }
-      ]
-    }
-  ]
-};
+const {v4: uuidv4} = require("uuid");
+const {DynamoDBClient} = require("@aws-sdk/client-dynamodb");
+const {PutCommand, DeleteCommand, ScanCommand} = require("@aws-sdk/lib-dynamodb");
+
+const docClient = new DynamoDBClient({region: process.env.AWS_REGION});
 
 exports.getInfo = (req, res) => {
   try {
@@ -132,8 +87,27 @@ exports.getInfo = (req, res) => {
           })
         )
           .then(() => {
-            res.json(userData);
-          });
+            const scanParams = {
+              TableName: process.env.AWS_TABLE_NAME
+            };
+            return docClient.send(new ScanCommand(scanParams));
+          })
+          .then((tableData) => {
+            const items = tableData.Items;
+            for (const item of items) {
+              if (item.student_id === userData.student_id) {
+                userData.courses.forEach((course, i) => {
+                  course.assignments.forEach((assignment, j) => {
+                    for (const item_id of item.item_ids)
+                      if (assignment.item_id === item_id)
+                        userData.courses[i].assignments[j].state = 1;
+                  })
+                });
+                break;
+              }
+            }
+          })
+          .then(() => res.json(userData));
       })
       .catch((err) => {
           console.error(err);
@@ -163,8 +137,8 @@ exports.accessToken = (req, res) => {
     const postData = querystring.stringify({
       grant_type: "authorization_code",
       code: parsedQuery.code,
-      client_id: process.env.client_id,
-      client_secret: process.env.client_secret,
+      client_id: process.env.CLIENT_ID,
+      client_secret: process.env.CLIENT_SECRET,
       redirect_uri: redirect_uri,
     });
 
@@ -192,7 +166,7 @@ exports.accessToken = (req, res) => {
           });
           if (token) {
             res.writeHead(302, {
-              Location: `http://${process.env.frontendIPAddress}?status=ok`,
+              Location: `http://${process.env.FRONT_ADDRESS}?status=ok`,
             });
             res.end();
           }
@@ -215,9 +189,50 @@ exports.accessToken = (req, res) => {
 
 exports.logout = (req, res) => {
   req.session.destroy();
-  res.redirect(`http://${process.env.frontendIPAddress}`);
+  res.redirect(`http://${process.env.FRONT_ADDRESS}`);
   res.end();
 };
+
+exports.scanTable = getTable;
+
+async function getTable(req, res) {
+  const scanParams = {
+    TableName: process.env.AWS_TABLE_NAME
+  };
+  try {
+    const tableData = await docClient.send(new ScanCommand(scanParams));
+    res.send(tableData.Items);
+  } catch (err) {
+    console.error(err);
+    res.status(400).end();
+  }
+}
+
+exports.postTable = putTable;
+
+async function putTable(req, res) {
+  console.log(req.body);
+  const item = {...req.body};
+  const deleteParams = {
+    TableName: process.env.AWS_TABLE_NAME,
+    Key: {
+      student_id: item.student_id,
+    },
+  };
+  const putParams = {
+    Item: item,
+    TableName: process.env.AWS_TABLE_NAME,
+  };
+  try {
+    await docClient.send(new DeleteCommand(deleteParams));
+    await docClient.send(new PutCommand(putParams));
+    console.log(item);
+    res.status(200).end();
+  } catch (err) {
+    console.error(err);
+    res.status(400).end();
+  }
+}
 
 function makeRequest(url, options) {
   return new Promise((resolve, reject) => {
