@@ -3,15 +3,15 @@ const cors = require("cors");
 const bodyParser = require("body-parser");
 const session = require("express-session");
 const dotenv = require("dotenv");
-dotenv.config({ path: "./config.env" });
+dotenv.config({path: "./config.env"});
 
 const AppError = require("./utils/appError");
 const cvRoutes = require("./routes/cvRoutes");
 
-const app=express();
+const app = express();
 
-const sessionOptions={
-    secret: "my-secret",
+const sessionOptions = {
+  secret: "my-secret",
   resave: true,
   saveUninitialized: true,
   cookie: {
@@ -20,16 +20,16 @@ const sessionOptions={
   },
 };
 
-const corsOptions ={
-    origin: true,
-    credentials: true,
+const corsOptions = {
+  origin: true,
+  credentials: true,
 };
 
 app.use(express.static("static"));
 app.use(cors(corsOptions));
 app.use(session(sessionOptions));
 app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
+app.use(bodyParser.urlencoded({extended: true}));
 
 app.use("/courseville", cvRoutes);
 app.get("/", (req, res) => {
